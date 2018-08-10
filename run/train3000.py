@@ -1,7 +1,7 @@
 # -*- coding: UTF-8 -*-
 from __future__ import division
-import sys, time, os, cPickle
-sys.path.append('..')
+import sys, time, os, pickle
+# sys.path.append('..')
 import dynet as dy
 import numpy as np
 import models
@@ -20,7 +20,7 @@ if __name__ == "__main__":
 	Parser = getattr(models, args.model)
 
 	vocab = Vocab(config.train_file, config.pretrained_embeddings_file, config.min_occur_count)
-	cPickle.dump(vocab, open(config.save_vocab_path, 'w'))
+	pickle.dump(vocab, open(config.save_vocab_path, 'wb'))
 	parser = Parser(vocab, config.word_dims, config.tag_dims, config.dropout_emb, config.lstm_layers, config.lstm_hiddens, config.dropout_lstm_input, config.dropout_lstm_hidden, config.mlp_arc_size, config.mlp_rel_size, config.dropout_mlp)
 	data_loader = DataLoader(config.train_file, config.num_buckets_train, vocab)
 	pc = parser.parameter_collection

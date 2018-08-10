@@ -46,8 +46,8 @@ class Tarjan:
     for dep, head in enumerate(prediction[tokens]):
       self._vertices.add(dep+1)
       self._edges[head].add(dep+1)
-    self._indices = {}
-    self._lowlinks = {}
+    self._indices = {} # 已经 visit 过的节点的时间戳记， 只要被打上时间戳记就算是 visited 也就是 DNF
+    self._lowlinks = {} # low
     self._onstack = defaultdict(lambda: False)
     self._SCCs = []
     
@@ -55,7 +55,7 @@ class Tarjan:
     stack = []
     for v in self.vertices:
       if v not in self.indices:
-        self.strongconnect(v, index, stack)
+        self.strongconnect(v, index, stack) # 注意 index 是 immutable 而 stack 是 mutable
   
   #=============================================================
   def strongconnect(self, v, index, stack):

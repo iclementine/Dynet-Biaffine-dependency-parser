@@ -1,6 +1,6 @@
-from ConfigParser import SafeConfigParser
+from configparser import SafeConfigParser
 import sys, os
-sys.path.append('..')
+# sys.path.append('..')
 import models
 
 class Configurable(object):
@@ -18,10 +18,10 @@ class Configurable(object):
 		if not os.path.isdir(self.save_dir):
 			os.mkdir(self.save_dir)
 		config.write(open(self.config_file,'w'))
-		print 'Loaded config file sucessfully.'
+		print('Loaded config file sucessfully.')
 		for section in config.sections():
 			for k, v in config.items(section):
-				print k, v
+				print(k, v)
 
 	@property
 	def pretrained_embeddings_file(self):

@@ -1,8 +1,9 @@
 # -*- coding: UTF-8 -*-
 import dynet as dy
 import numpy as np
-from data import Vocab
-from tarjan import Tarjan
+
+from lib.data import Vocab
+from lib.tarjan import Tarjan
 
 def orthonormal_VanillaLSTMBuilder(lstm_layers, input_dims, lstm_hiddens, pc):
 	builder = dy.VanillaLSTMBuilder(lstm_layers, input_dims, lstm_hiddens, pc)
@@ -32,6 +33,7 @@ def leaky_relu(x):
 	return dy.bmax(.1*x, x)
 
 def bilinear(x, W, y, input_size, seq_len, batch_size, num_outputs = 1, bias_x = False, bias_y = False):
+	# 经典的两个嵌入中间乘一个矩阵做维度变换的方法
 	# x,y: (input_size x seq_len) x batch_size
 	if bias_x:
 		x = dy.concatenate([x, dy.inputTensor(np.ones((1, seq_len), dtype=np.float32))])
@@ -39,7 +41,7 @@ def bilinear(x, W, y, input_size, seq_len, batch_size, num_outputs = 1, bias_x =
 		y = dy.concatenate([y, dy.inputTensor(np.ones((1, seq_len), dtype=np.float32))])
 	
 	nx, ny = input_size + bias_x, input_size + bias_y
-	# W: (num_outputs x ny) x nx
+	# W: (ny x num_outputs) x nx
 	lin = W * x
 	if num_outputs > 1:
 		lin = dy.reshape(lin, (ny, num_outputs*seq_len), batch_size = batch_size)
@@ -55,7 +57,7 @@ def orthonormal_initializer(output_size, input_size):
 	"""
 	adopted from Timothy Dozat https://github.com/tdozat/Parser/blob/master/lib/linalg.py
 	"""
-	print (output_size, input_size)
+	print(output_size, input_size)
 	I = np.eye(output_size)
 	lr = .1
 	eps = .05/(output_size + input_size)
@@ -63,7 +65,7 @@ def orthonormal_initializer(output_size, input_size):
 	tries = 0
 	while not success and tries < 10:
 		Q = np.random.randn(input_size, output_size) / np.sqrt(output_size)
-		for i in xrange(100):
+		for i in range(100):
 			QTQmI = Q.T.dot(Q) - I
 			loss = np.sum(QTQmI**2 / 2)
 			Q2 = Q**2
@@ -96,9 +98,10 @@ def arc_argmax(parse_probs, length, tokens_to_keep, ensure_tree = True):
 			# The current root probabilities
 			root_probs = parse_probs[tokens,0]
 			# The current head probabilities
-			old_head_probs = parse_probs[tokens, parse_preds[tokens]]
+			old_head_probs = parse_probs[tokens, parse_preds[tokens]] # 一列， 原来选出的边的概率
 			# Get new potential root probabilities
-			new_root_probs = root_probs / old_head_probs
+			new_root_probs = root_probs / old_head_probs 
+			# 那岂不是会找出一个词 join to root 和 join to old head 的比`	， 最大的那个就去做 root
 			# Select the most probable root
 			new_root = tokens[np.argmax(new_root_probs)]
 			# Make the change
@@ -111,15 +114,19 @@ def arc_argmax(parse_probs, length, tokens_to_keep, ensure_tree = True):
 			parse_probs[roots,0] = 0
 			# Get new potential heads and their probabilities
 			new_heads = np.argmax(parse_probs[roots][:,tokens], axis=1)+1
-			new_head_probs = parse_probs[roots, new_heads] / root_probs
+			new_head_probs = parse_probs[roots, new_heads] / root_probs # 找到多个竞争的 root 的次优 head 选择， 看看比值
 			# Select the most probable root
-			new_root = roots[np.argmin(new_head_probs)]
+			new_root = roots[np.argmin(new_head_probs)] # 选择其中最小的那个 ，也就是最不可能选择其他 head 节点的那个作为 root
 			# Make the change
 			parse_preds[roots] = new_heads
 			parse_preds[new_root] = 0
-		# remove cycles
+			
+		#print(parse_preds)
+		# remove cycles # 但是要是不联通那怎么办
 		tarjan = Tarjan(parse_preds, tokens)
 		cycles = tarjan.SCCs
+		#print(cycles)
+		
 		for SCC in tarjan.SCCs:
 			if len(SCC) > 1:
 				dependents = set()

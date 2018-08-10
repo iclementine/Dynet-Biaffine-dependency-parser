@@ -6,30 +6,21 @@ import numpy as np
 from lib import biLSTM, leaky_relu, bilinear, orthonormal_initializer, arc_argmax, rel_argmax, orthonormal_VanillaLSTMBuilder
 
 class BaseParser(object):
-	def __init__(self, vocab,
-					   word_dims,
-					   tag_dims,
-					   dropout_dim,
-					   lstm_layers,
-					   lstm_hiddens,
-					   dropout_lstm_input,
-					   dropout_lstm_hidden,
-					   mlp_arc_size,
-					   mlp_rel_size,
-					   dropout_mlp,
-					   ):
+	def __init__(self, vocab, word_dims, tag_dims, dropout_dim, lstm_layers, lstm_hiddens, dropout_lstm_input, dropout_lstm_hidden, mlp_arc_size, mlp_rel_size, dropout_mlp, pre_train_emb=False):
 		pc = dy.ParameterCollection()
-
+		
 		self._vocab = vocab
 		self.word_embs = pc.lookup_parameters_from_numpy(vocab.get_word_embs(word_dims))
-		self.pret_word_embs = pc.lookup_parameters_from_numpy(vocab.get_pret_embs())
+		self.pre_train_emb = pre_train_emb
+		if self.pre_train_emb:
+			self.pret_word_embs = pc.lookup_parameters_from_numpy(vocab.get_pret_embs())
 		self.tag_embs = pc.lookup_parameters_from_numpy(vocab.get_tag_embs(tag_dims))
 		
 		self.LSTM_builders = []
 		f = orthonormal_VanillaLSTMBuilder(1, word_dims+tag_dims, lstm_hiddens, pc)
 		b = orthonormal_VanillaLSTMBuilder(1, word_dims+tag_dims, lstm_hiddens, pc)
 		self.LSTM_builders.append((f,b))
-		for i in xrange(lstm_layers-1):
+		for i in range(lstm_layers-1):
 			f = orthonormal_VanillaLSTMBuilder(1, 2*lstm_hiddens, lstm_hiddens, pc)
 			b = orthonormal_VanillaLSTMBuilder(1, 2*lstm_hiddens, lstm_hiddens, pc)
 			self.LSTM_builders.append((f,b))
@@ -53,7 +44,7 @@ class BaseParser(object):
 
 		def _emb_mask_generator(seq_len, batch_size):
 			ret = []
-			for i in xrange(seq_len):
+			for i in range(seq_len):
 				word_mask = np.random.binomial(1, 1. - dropout_dim, batch_size).astype(np.float32)
 				tag_mask = np.random.binomial(1, 1. - dropout_dim, batch_size).astype(np.float32)
 				scale = 3. / (2.*word_mask + tag_mask + 1e-12)
@@ -82,9 +73,15 @@ class BaseParser(object):
 		
 		if isTrain or arc_targets is not None:
 			mask_1D = dynet_flatten_numpy(mask)
+			# batched here means that the last dim is treated as batch dimension, both in input and output
 			mask_1D_tensor = dy.inputTensor(mask_1D, batched = True)
 		
-		word_embs = [dy.lookup_batch(self.word_embs, np.where( w<self._vocab.words_in_train, w, self._vocab.UNK)) + dy.lookup_batch(self.pret_word_embs, w, update = False) for w in word_inputs]
+		# TODO: 注意 _words_in_train
+		# 两个 embedding 相加, [Expression of dim=((embedding_dim,), batch_size)] * seq_len
+		if self.pre_train_emb:
+			word_embs = [dy.lookup_batch(self.word_embs, np.where( w<self._vocab.words_in_train, w, self._vocab.UNK)) + dy.lookup_batch(self.pret_word_embs, w, update = False) for w in word_inputs] # 两个 embedding 相加 [Expression] * seq_len
+		else:
+			word_embs = [dy.lookup_batch(self.word_embs, np.where( w<self._vocab.words_in_train, w, self._vocab.UNK)) for w in word_inputs]
 		tag_embs = [dy.lookup_batch(self.tag_embs, pos) for pos in tag_inputs]
 		
 		if isTrain:
@@ -101,7 +98,8 @@ class BaseParser(object):
 		W_head, b_head = dy.parameter(self.mlp_head_W), dy.parameter(self.mlp_head_b)
 		dep, head = leaky_relu(dy.affine_transform([b_dep, W_dep, top_recur])),leaky_relu(dy.affine_transform([b_head, W_head, top_recur]))
 		if isTrain:
-			dep, head= dy.dropout_dim(dep, 1, self.dropout_mlp), dy.dropout_dim(head, 1, self.dropout_mlp)
+			dep, head= dy.dropout_dim(dep, 1, self.dropout_mlp), dy.dropout_dim(head, 1, self.dropout_mlp) 
+			# 1 就意味着某些情况下整个 dim 1 变成0， dim=0 就是 drop 列， dim=1 就是 drop 行， 第三维是 batch
 		
 		dep_arc, dep_rel = dep[:self.mlp_arc_size], dep[self.mlp_arc_size:]
 		head_arc, head_rel = head[:self.mlp_arc_size], head[self.mlp_arc_size:]
@@ -110,14 +108,15 @@ class BaseParser(object):
 		arc_logits = bilinear(dep_arc, W_arc, head_arc, self.mlp_arc_size, seq_len, batch_size, num_outputs= 1, bias_x = True, bias_y = False)
 		# (#head x #dep) x batch_size
 		
-		flat_arc_logits = dy.reshape(arc_logits, (seq_len,), seq_len * batch_size)
+		flat_arc_logits = dy.reshape(arc_logits, (seq_len,), seq_len * batch_size) # 这种风格的平坦是为了计算 loss 啦
 		# (#head ) x (#dep x batch_size)
 
 		arc_preds = arc_logits.npvalue().argmax(0)
 		# seq_len x batch_size
 
 		if isTrain or arc_targets is not None:
-			arc_correct = np.equal(arc_preds, arc_targets).astype(np.float32) * mask
+			# 用得分最高的去计算 loss, 并不意味着我就选这个作为解码结果的哦， 但是必须削减它
+			arc_correct = np.equal(arc_preds, arc_targets).astype(np.float32) * mask # mask 你真厉害呀现在还活着
 			arc_accuracy = np.sum(arc_correct) / num_tokens
 			targets_1D = dynet_flatten_numpy(arc_targets)
 			losses = dy.pickneglogsoftmax_batch(flat_arc_logits, targets_1D)
@@ -142,7 +141,7 @@ class BaseParser(object):
 		if isTrain or arc_targets is not None:
 			rel_preds = partial_rel_logits.npvalue().argmax(0)
 			targets_1D = dynet_flatten_numpy(rel_targets)
-			rel_correct = np.equal(rel_preds, targets_1D).astype(np.float32) * mask_1D
+			rel_correct = np.equal(rel_preds, targets_1D).astype(np.float32) * mask_1D # 这里的形状如此， 需要用 mask1d
 			rel_accuracy = np.sum(rel_correct)/ num_tokens
 			losses = dy.pickneglogsoftmax_batch(partial_rel_logits, targets_1D)
 			rel_loss = dy.sum_batches(losses * mask_1D_tensor) / num_tokens
@@ -162,13 +161,14 @@ class BaseParser(object):
 		outputs = []
 		
 		for msk, arc_prob, rel_prob in zip(np.transpose(mask), arc_probs, rel_probs):
-			# parse sentences one by one
+			# parse sentences one by ones
+			# 我非常赞同， parse 的解码这一部分根本没法 batch
 			msk[0] = 1.
 			sent_len = int(np.sum(msk))
 			arc_pred = arc_argmax(arc_prob, sent_len, msk)
 			rel_prob = rel_prob[np.arange(len(arc_pred)),arc_pred]
 			rel_pred = rel_argmax(rel_prob, sent_len)
-			outputs.append((arc_pred[1:sent_len], rel_pred[1:sent_len]))
+			outputs.append((arc_pred[1:sent_len], rel_pred[1:sent_len])) # 难道第 0 个真的是 ROOT, 确实如此
 		
 		if arc_targets is not None:
 			return arc_accuracy, rel_accuracy, overall_accuracy, outputs

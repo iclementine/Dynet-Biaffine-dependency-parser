@@ -1,12 +1,13 @@
 #Embedded file name: /home/dengcai/code/run/test.py
 from __future__ import division
 import sys
-sys.path.append('..')
-import time, os, cPickle
+# sys.path.append('..')
+import time, os, pickle
 import dynet as dy
 import models
 from lib import Vocab, DataLoader
-from config import Configurable
+from run.config import Configurable
+from functools import reduce
 
 def test(parser, vocab, num_buckets_test, test_batch_size, test_file, output_file):
     data_loader = DataLoader(test_file, num_buckets_test, vocab)
@@ -40,7 +41,7 @@ def test(parser, vocab, num_buckets_test, test_batch_size, test_file, output_fil
     os.system('perl eval.pl -q -b -g %s -s %s -o tmp' % (test_file, output_file))
     os.system('tail -n 3 tmp > score_tmp')
     LAS, UAS = [float(line.strip().split()[-2]) for line in open('score_tmp').readlines()[:2]]
-    print 'LAS %.2f, UAS %.2f'%(LAS, UAS)
+    print('LAS %.2f, UAS %.2f'%(LAS, UAS))
     os.system('rm tmp score_tmp')
     return LAS, UAS
 
@@ -54,7 +55,7 @@ if __name__ == '__main__':
     args, extra_args = argparser.parse_known_args()
     config = Configurable(args.config_file, extra_args)
     Parser = getattr(models, args.model)
-    vocab = cPickle.load(open(config.load_vocab_path))
+    vocab = pickle.load(open(config.load_vocab_path))
     parser = Parser(vocab, config.word_dims, config.tag_dims, config.dropout_emb, config.lstm_layers, config.lstm_hiddens, config.dropout_lstm_input, config.dropout_lstm_hidden, config.mlp_arc_size, config.mlp_rel_size, config.dropout_mlp)
     parser.load(config.load_model_path)
     test(parser, vocab, config.num_buckets_test, config.test_batch_size, config.test_file, args.output_file)

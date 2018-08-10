@@ -95,7 +95,7 @@ class KMeans(object):
   def recenter(self):
     """"""
     
-    for split_idx in xrange(len(self._splits)):
+    for split_idx in range(len(self._splits)):
       split = self._splits[split_idx]
       len_idx = self._split2len_idx[split]
       if split == self._splits[-1]:
@@ -171,13 +171,13 @@ class KMeans(object):
     return self._splits
   @property
   def len2split_idx(self):
-    return len2split_idx
+    return self._len2split_idx
   
 #***************************************************************
 if __name__ == '__main__':
   """"""
   
   len_cntr = Counter()
-  for i in xrange(10000):
+  for i in range(10000):
     len_cntr[1+int(10**(1+np.random.randn()))] += 1
   kmeans = KMeans(10, len_cntr)
